@@ -19,8 +19,17 @@ namespace bm {
     };
 
 
+
     class StreamDecoder : public StreamDemuxerEvents {
         StreamDecoderEvents *m_observer;
+
+        using OnDecodedFrameCallback = std::function<void(const AVPacket *pkt, const AVFrame *pFrame)>;
+        using OnDecodedSEICallback =std::function<void(const uint8_t *sei_data, int sei_data_len, uint64_t pts, int64_t pkt_pos)>;
+        using OnStreamEofCallback = std::function<void()>;
+        OnDecodedFrameCallback m_OnDecodedFrameFunc;
+        OnDecodedSEICallback m_OnDecodedSEIFunc;
+        OnStreamEofCallback m_OnSteamEofFunc;
+
     protected:
         std::list<AVPacket *> m_list_packets;
         AVCodecContext *m_dec_ctx{nullptr};
@@ -60,6 +69,10 @@ namespace bm {
         virtual ~StreamDecoder();
 
         int set_observer(StreamDecoderEvents *observer);
+
+        void set_decoded_frame_callback(OnDecodedFrameCallback func);
+        void set_decoded_sei_info_callback(OnDecodedSEICallback func);
+        void set_stream_eof_callback(OnStreamEofCallback func);
 
         int open_stream(std::string url, bool repeat = true, AVDictionary *opts=nullptr);
 

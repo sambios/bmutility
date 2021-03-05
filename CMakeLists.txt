@@ -8,5 +8,6 @@ include_directories(${bmnnsdk_inc_dirs})
 
 add_library(bmutility stream_sei.cpp
         stream_demuxer.cpp
-        stream_decode.cpp)
+        stream_decode.cpp
+        bmutility_timer.cpp)
 

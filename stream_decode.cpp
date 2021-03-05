@@ -123,10 +123,17 @@ namespace bm {
                 0 == pkt->data[2] &&
                 1 == pkt->data[3] &&
                 (pkt->data[4] & 0x1f) == 6) {
-                if (m_observer != nullptr) {
+
+                if (m_OnDecodedSEIFunc != nullptr || m_observer != nullptr) {
                     sei_len = h264sei_packet_read(pkt->data, pkt->size, sei_buf_ptr.get(), pkt->size);
                     if (sei_len > 0) {
-                        m_observer->on_decoded_sei_info(sei_buf_ptr.get(), sei_len, pkt->pts, pkt->pos);
+                        if (m_observer != nullptr) {
+                            m_observer->on_decoded_sei_info(sei_buf_ptr.get(), sei_len, pkt->pts, pkt->pos);
+                        }
+
+                        if (m_OnDecodedSEIFunc != nullptr) {
+                            m_OnDecodedSEIFunc(sei_buf_ptr.get(), sei_len, pkt->pts, pkt->pos);
+                        }
                     }
                 }
             }
@@ -148,10 +155,16 @@ namespace bm {
                 }
 
                 if (nal_type == 39) {
-                    if (m_observer != nullptr) {
+                    if (m_observer != nullptr || m_OnDecodedSEIFunc != nullptr) {
                         sei_len = h265sei_packet_read(pkt->data, pkt->size, sei_buf_ptr.get(), pkt->size);
                         if (sei_len > 0) {
-                            m_observer->on_decoded_sei_info(sei_buf_ptr.get(), sei_len, pkt->pts, pkt->pos);
+                            if (m_observer != nullptr) {
+                                m_observer->on_decoded_sei_info(sei_buf_ptr.get(), sei_len, pkt->pts, pkt->pos);
+                            }
+
+                            if (m_OnDecodedSEIFunc != nullptr) {
+                                m_OnDecodedSEIFunc(sei_buf_ptr.get(), sei_len, pkt->pts, pkt->pos);
+                            }
                         }
                     }
                 }
@@ -185,6 +198,9 @@ namespace bm {
             if (m_observer){
                 m_observer->on_decoded_avframe(pkt_s, pFrame);
             }
+            if (m_OnDecodedFrameFunc != nullptr) {
+                m_OnDecodedFrameFunc(pkt_s, pFrame);
+            }
 
             av_packet_unref(pkt_s);
             av_freep(&pkt_s);
@@ -212,6 +228,10 @@ namespace bm {
 
         if (m_observer){
             m_observer->on_stream_eof();
+        }
+
+        if (m_OnSteamEofFunc != nullptr) {
+            m_OnSteamEofFunc();
         }
 
     }
@@ -327,6 +347,21 @@ namespace bm {
     {
         m_observer = observer;
         return 0;
+    }
+
+    void StreamDecoder::set_decoded_frame_callback(OnDecodedFrameCallback func)
+    {
+        m_OnDecodedFrameFunc = func;
+    }
+
+    void StreamDecoder::set_decoded_sei_info_callback(OnDecodedSEICallback func)
+    {
+        m_OnDecodedSEIFunc = func;
+    }
+
+    void StreamDecoder::set_stream_eof_callback(OnStreamEofCallback func)
+    {
+        m_OnSteamEofFunc = func;
     }
 
     int StreamDecoder::open_stream(std::string url, bool repeat, AVDictionary *opts)

@@ -20,10 +20,37 @@
 #include <sys/time.h>
 
 #include "bmruntime_interface.h"
-
+#include "bmutility_timer.h"
 #include "bmutility_image.h"
+#include "stream_decode.h"
 
 namespace bm {
+    static int bm_tensor_reshape_NCHW(bm_handle_t handle, bm_tensor_t *tensor, int n, int c, int h, int w) {
+        tensor->shape.num_dims=4;
+        tensor->shape.dims[0] = n;
+        tensor->shape.dims[1] = c;
+        tensor->shape.dims[2] = h;
+        tensor->shape.dims[3] = w;
+
+        int size = bmrt_tensor_bytesize(tensor);
+        int ret = bm_malloc_device_byte(handle, &tensor->device_mem, size);
+        assert(BM_SUCCESS == ret);
+        return ret;
+    }
+
+    static int bm_tensor_reshape_NHWC(bm_handle_t handle, bm_tensor_t *tensor, int n, int h, int w, int c) {
+        tensor->shape.num_dims=4;
+        tensor->shape.dims[0] = n;
+        tensor->shape.dims[1] = h;
+        tensor->shape.dims[2] = w;
+        tensor->shape.dims[3] = c;
+
+        int size = bmrt_tensor_bytesize(tensor);
+        int ret = bm_malloc_device_byte(handle, &tensor->device_mem, size);
+        assert(BM_SUCCESS == ret);
+        return ret;
+    }
+
     class NoCopyable {
     protected:
         NoCopyable() = default;
@@ -52,9 +79,10 @@ namespace bm {
         bm_tensor_t *m_tensor;
 
     public:
-        BMNNTensor(bm_handle_t handle, const char *name, float scale,
+        BMNNTensor(bm_handle_t handle, const std::string& name, float scale,
                    bm_tensor_t *tensor) : m_handle(handle), m_name(name),
-                                          m_cpu_data(nullptr), m_scale(scale), m_tensor(tensor) {
+                                          m_cpu_data(nullptr), m_scale(scale), m_tensor(tensor)
+                                          {
         }
 
         virtual ~BMNNTensor() {
@@ -82,10 +110,25 @@ namespace bm {
 
         void *get_cpu_data() {
             if (m_cpu_data == NULL) {
-                int tensor_size = bmrt_tensor_bytesize(m_tensor);
-                m_cpu_data = new int8_t[tensor_size];
-                assert(NULL != m_cpu_data);
-                bm_memcpy_d2s(m_handle, m_cpu_data, m_tensor->device_mem);
+                float *pFP32 = nullptr;
+                int count = bmrt_shape_count(&m_tensor->shape);
+                if (m_tensor->dtype == BM_FLOAT32) {
+                    pFP32 = new float[count];
+                    bm_memcpy_d2s(m_handle, pFP32, m_tensor->device_mem);
+                }else if (BM_INT8 == m_tensor->dtype) {
+                    int tensor_size = bmrt_tensor_bytesize(m_tensor);
+                    int8_t *pU8 = new int8_t[tensor_size];
+                    pFP32 = new float[count];
+                    bm_memcpy_d2s(m_handle, pU8, m_tensor->device_mem);
+                    for(int i = 0;i < count; ++ i) {
+                        pFP32[i] = pU8[i] * m_scale;
+                    }
+                    delete [] pU8;
+                }else{
+                    std::cout << "NOT support dtype=" << m_tensor->dtype << std::endl;
+                }
+
+                m_cpu_data = pFP32;
             }
 
             return m_cpu_data;
@@ -107,9 +150,17 @@ namespace bm {
             return m_tensor;
         }
 
+        int reshape_nchw(int n, int c, int h, int w) {
+            return bm_tensor_reshape_NCHW(m_handle, m_tensor, n, c, h, w);
+        }
+
+        int reshape_nhwc(int n, int c, int h, int w) {
+            return bm_tensor_reshape_NHWC(m_handle, m_tensor, n, c, h, w);
+        }
     };
 
     using BMNNTensorPtr = std::shared_ptr<BMNNTensor>;
+
 
     class BMNNNetwork : public NoCopyable {
         const bm_net_info_t *m_netinfo;
@@ -118,8 +169,8 @@ namespace bm {
         bm_handle_t m_handle;
         void *m_bmrt;
 
-        std::unordered_map<std::string, bm_tensor_t *> m_mapInputs;
-        std::unordered_map<std::string, bm_tensor_t *> m_mapOutputs;
+        std::unordered_map<std::string, int> m_mapInputName2Index;
+        std::unordered_map<std::string, int> m_mapOutputName2Index;
 
     public:
         BMNNNetwork(void *bmrt, const std::string &name) : m_bmrt(bmrt) {
@@ -132,6 +183,7 @@ namespace bm {
                 m_inputTensors[i].shape = m_netinfo->stages[0].input_shapes[i];
                 m_inputTensors[i].st_mode = BM_STORE_1N;
                 m_inputTensors[i].device_mem = bm_mem_null();
+                m_mapInputName2Index[m_netinfo->input_names[i]] = i;
             }
 
             for (int i = 0; i < m_netinfo->output_num; ++i) {
@@ -139,6 +191,7 @@ namespace bm {
                 m_outputTensors[i].shape = m_netinfo->stages[0].output_shapes[i];
                 m_outputTensors[i].st_mode = BM_STORE_1N;
                 m_outputTensors[i].device_mem = bm_mem_null();
+                m_mapOutputName2Index[m_netinfo->output_names[i]] = i;
             }
 
             assert(m_netinfo->stage_num >= 1);
@@ -146,6 +199,22 @@ namespace bm {
 
         int inputTensorNum() {
             return m_netinfo->input_num;
+        }
+
+        int inputName2Index(const std::string& name) {
+            if (m_mapInputName2Index.find(name) != m_mapInputName2Index.end()) {
+                return m_mapInputName2Index[name];
+            }
+
+            return -1;
+        }
+
+        int outputName2Index(const std::string& name) {
+            if (m_mapOutputName2Index.find(name) != m_mapOutputName2Index.end()) {
+                return m_mapOutputName2Index[name];
+            }
+
+            return -1;
         }
 
         std::shared_ptr<BMNNTensor> inputTensor(int index) {
@@ -184,10 +253,10 @@ namespace bm {
             return 0;
         }
 
-        int forward(bm_tensor_t *input_tensors, int input_num, bm_tensor_t *output_tensors, int output_num)
+        int forward(const bm_tensor_t *input_tensors, int input_num, bm_tensor_t *output_tensors, int output_num)
         {
             bool ok = bmrt_launch_tensor_ex(m_bmrt, m_netinfo->name, input_tensors, input_num,
-                    output_tensors, output_num, true, true);
+                    output_tensors, output_num, false, false);
             if (!ok) {
                 std::cout << "bm_launch_tensor_ex() failed=" << std::endl;
                 return -1;
@@ -231,7 +300,7 @@ namespace bm {
         std::vector<std::string> m_network_names;
 
     public:
-        BMNNContext(BMNNHandlePtr handle, const char *bmodel_file) : m_handlePtr(handle) {
+        BMNNContext(BMNNHandlePtr handle, const std::string& bmodel_file) : m_handlePtr(handle) {
             bm_handle_t hdev = m_handlePtr->handle();
             m_bmrt = bmrt_create(hdev);
             if (NULL == m_bmrt) {
@@ -239,7 +308,7 @@ namespace bm {
                 exit(-1);
             }
 
-            if (!bmrt_load_bmodel(m_bmrt, bmodel_file)) {
+            if (!bmrt_load_bmodel(m_bmrt, bmodel_file.c_str())) {
                 std::cout << "load bmodel(" << bmodel_file << ") failed" << std::endl;
             }
 
@@ -297,32 +366,7 @@ namespace bm {
 
     using BMNNContextPtr = std::shared_ptr<BMNNContext>;
 
-    class BMPerf {
-        int64_t start_us_;
-        std::string tag_;
-        int threshold_{50};
-    public:
-        BMPerf() {}
 
-        ~BMPerf() {}
-
-        void begin(const std::string &name, int threshold = 50) {
-            tag_ = name;
-            auto n = std::chrono::steady_clock::now();
-            start_us_ = n.time_since_epoch().count();
-            threshold_ = threshold;
-        }
-
-        void end() {
-            auto n = std::chrono::steady_clock::now().time_since_epoch().count();
-            auto delta = (n - start_us_) / 1000;
-            if (delta < threshold_ * 1000) {
-                //printf("%s used:%d us\n", tag_.c_str(), delta);
-            } else {
-                printf("WARN:%s used:%d us > %d\n", tag_.c_str(), delta, threshold_);
-            }
-        }
-    };
 } // end of namespace bm
 
 
