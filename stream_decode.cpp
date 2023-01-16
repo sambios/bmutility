@@ -1,10 +1,14 @@
+//===----------------------------------------------------------------------===//
 //
-// Created by hsyuan on 2019-02-27.
+// Copyright (C) 2022 Sophgo Technologies Inc.  All rights reserved.
 //
+// SOPHON-PIPELINE is licensed under the 2-Clause BSD License except for the
+// third-party components.
+//
+//===----------------------------------------------------------------------===//
 
 #include "stream_decode.h"
 #include "stream_sei.h"
-#include "bmutility.h"
 
 namespace bm {
     StreamDecoder::StreamDecoder(int id, AVCodecContext *decoder):m_observer(nullptr),
@@ -30,29 +34,30 @@ namespace bm {
         }
 
 #if LIBAVCODEC_VERSION_MAJOR > 56
+        int got_picture = 0;
         int ret = avcodec_send_packet(dec_ctx, pkt);
-        if (ret < 0) {
-            if (ret == AVERROR_EOF) {
-                //avcodec_flush_buffers(dec_ctx);
-            }
+        if (ret == AVERROR_EOF) ret = 0;
+        else if (ret < 0) {
             printf(" error sending a packet for decoding\n");
             return -1;
         }
 
-
-        ret = avcodec_receive_frame(dec_ctx, pFrame);
-        if (ret !=0) {
+        while (ret >= 0) {
+            ret = avcodec_receive_frame(dec_ctx, pFrame);
             if (ret == AVERROR(EAGAIN)) {
                 printf("decoder need more stream!\n");
-            }
-            if (ret == AVERROR_EOF) {
-                //avcodec_flush_buffers(dec_ctx);
+                break;
+            } else if (ret == AVERROR_EOF) {
+                printf("avcodec_receive_frame() err=end of file!\n");
             }
 
-            return 0;
+            if (0 == ret) {
+                got_picture += 1;
+                break;
+            }
         }
 
-        return 1;
+        return got_picture;
 
 #else
         int got_frame = 0;
@@ -61,7 +66,7 @@ namespace bm {
             return -1;
         }
 
-        if (got_frame) {
+        if (got_frame > 0) {
             return 1;
         }
 
@@ -71,6 +76,10 @@ namespace bm {
 
 
     void StreamDecoder::on_avformat_opened(AVFormatContext *ifmt_ctx) {
+        if (m_pfnOnAVFormatOpened != nullptr) {
+            m_pfnOnAVFormatOpened(ifmt_ctx);
+        }
+
         if (m_external_dec_ctx == nullptr) {
             if (0 == create_video_decoder(ifmt_ctx)) {
                 printf("create video decoder ok!\n");
@@ -88,6 +97,10 @@ namespace bm {
             avcodec_close(m_dec_ctx);
             avcodec_free_context(&m_dec_ctx);
             printf("free video decoder context!\n");
+        }
+
+        if (m_pfnOnAVFormatClosed) {
+            m_pfnOnAVFormatClosed();
         }
 
     }
@@ -173,10 +186,10 @@ namespace bm {
 
 
         AVFrame *pFrame = av_frame_alloc();
-        bm::BMPerf perf;
-        perf.begin("Decode", 60);
+        //bm::BMPerf perf;
+        //perf.begin("Decode", 120);
         ret = decode_frame(pkt, pFrame);
-        perf.end();
+        //perf.end();
 
         if (ret < 0) {
             printf("decode failed!\n");
@@ -198,6 +211,7 @@ namespace bm {
             if (m_observer){
                 m_observer->on_decoded_avframe(pkt_s, pFrame);
             }
+
             if (m_OnDecodedFrameFunc != nullptr) {
                 m_OnDecodedFrameFunc(pkt_s, pFrame);
             }
@@ -215,7 +229,7 @@ namespace bm {
     void StreamDecoder::on_read_eof(AVPacket *pkt) {
         //flush decode cache.
         // bm_ffmpeg not supported.
-#if 0
+#if 1
         while (1) {
             int ret = on_read_frame(pkt);
             if (ret <= 0) {
@@ -230,8 +244,8 @@ namespace bm {
             m_observer->on_stream_eof();
         }
 
-        if (m_OnSteamEofFunc != nullptr) {
-            m_OnSteamEofFunc();
+        if (m_pfnOnReadEof != nullptr) {
+            m_pfnOnReadEof(nullptr);
         }
 
     }
@@ -285,8 +299,16 @@ namespace bm {
         return m_video_stream_index;
     }
 
+    AVCodecID StreamDecoder::get_video_codec_id() {
+        if (m_dec_ctx) {
+            return m_dec_ctx->codec_id;
+        }
+        return AV_CODEC_ID_NONE;
+    }
+
     int StreamDecoder::create_video_decoder(AVFormatContext *ifmt_ctx) {
         int video_index = get_video_stream_index(ifmt_ctx);
+        m_timebase = ifmt_ctx->streams[video_index]->time_base;
 
 #if LIBAVCODEC_VERSION_MAJOR > 56
         auto codec_id = ifmt_ctx->streams[video_index]->codecpar->codec_id;
@@ -347,21 +369,6 @@ namespace bm {
     {
         m_observer = observer;
         return 0;
-    }
-
-    void StreamDecoder::set_decoded_frame_callback(OnDecodedFrameCallback func)
-    {
-        m_OnDecodedFrameFunc = func;
-    }
-
-    void StreamDecoder::set_decoded_sei_info_callback(OnDecodedSEICallback func)
-    {
-        m_OnDecodedSEIFunc = func;
-    }
-
-    void StreamDecoder::set_stream_eof_callback(OnStreamEofCallback func)
-    {
-        m_OnSteamEofFunc = func;
     }
 
     int StreamDecoder::open_stream(std::string url, bool repeat, AVDictionary *opts)
@@ -456,3 +463,4 @@ namespace bm {
         }
     }
 }
+

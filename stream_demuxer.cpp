@@ -1,14 +1,19 @@
+//===----------------------------------------------------------------------===//
 //
-// Created by hsyuan on 2019-02-22.
+// Copyright (C) 2022 Sophgo Technologies Inc.  All rights reserved.
 //
+// SOPHON-PIPELINE is licensed under the 2-Clause BSD License except for the
+// third-party components.
+//
+//===----------------------------------------------------------------------===//
 
 #include "stream_demuxer.h"
 //#include "otl_utils.h"
 
 namespace bm {
 
-    StreamDemuxer::StreamDemuxer() : m_ifmt_ctx(nullptr), m_observer(nullptr),
-                                     m_thread_reading(nullptr) {
+    StreamDemuxer::StreamDemuxer(int id) : m_ifmt_ctx(nullptr), m_observer(nullptr),
+                                     m_thread_reading(nullptr),m_id(id) {
         m_ifmt_ctx = avformat_alloc_context();
     }
 
@@ -75,6 +80,10 @@ int StreamDemuxer::get_codec_type(int stream_index, int *p_codec_type)
             m_observer->on_avformat_opened(m_ifmt_ctx);
         }
 
+        if (m_pfnOnAVFormatOpened != nullptr) {
+            m_pfnOnAVFormatOpened(m_ifmt_ctx);
+        }
+
         // Enter Working service
         m_work_state = Service;
 
@@ -87,6 +96,10 @@ int StreamDemuxer::get_codec_type(int stream_index, int *p_codec_type)
 
         if (m_observer) {
             m_observer->on_avformat_closed();
+        }
+
+        if (m_pfnOnAVFormatClosed != nullptr) {
+            m_pfnOnAVFormatClosed();
         }
 
         if (m_repeat) {
@@ -106,23 +119,28 @@ int StreamDemuxer::get_codec_type(int stream_index, int *p_codec_type)
         av_init_packet(pkt);
 #endif
 
-        AVRational framerate = m_ifmt_ctx->streams[0]->avg_frame_rate;
-        if (0 == framerate.num || framerate.den == 0) {
-            framerate.num = 25;framerate.den = 1;
-        }
-        int64_t IntervalTime = 1000000*framerate.den/framerate.num;
+        m_start_time = av_gettime();
+        int64_t frame_index = 0;
         while (Service == m_work_state) {
             int ret = av_read_frame(m_ifmt_ctx, pkt);
             if (ret < 0) {
                 if (ret != AVERROR_EOF) continue;
                 if (m_repeat && m_is_file_url) {
-                    ret = av_seek_frame(m_ifmt_ctx, 0, m_ifmt_ctx->start_time, AVSEEK_FLAG_BYTE);
+                    ret = av_seek_frame(m_ifmt_ctx, -1, m_ifmt_ctx->start_time, 0);
                     if (ret != 0) {
-                        std::cout << "av_seek_frame failed!" << std::endl;
+                        ret = av_seek_frame(m_ifmt_ctx,  -1, m_ifmt_ctx->start_time, AVSEEK_FLAG_BYTE);
+                        if (ret < 0) {
+                            std::cout << "av_seek_frame failed!" << std::endl;
+                        }
                     }
+                    frame_index = 0;
+                    m_start_time = av_gettime();
+                    printf("seek_to_start\n");
                     continue;
                 }else{
-                    m_observer->on_read_eof(pkt);
+                    printf("file[%d] end!\n", m_id);
+                    if (m_observer) m_observer->on_read_eof(pkt);
+                    if (m_pfnOnReadEof != nullptr) m_pfnOnReadEof(pkt);
                     m_work_state = Down;
                 }
 
@@ -130,15 +148,37 @@ int StreamDemuxer::get_codec_type(int stream_index, int *p_codec_type)
             }
 
             if (m_last_frame_time != 0) {
-                int64_t delta = av_gettime() - m_last_frame_time;
-                if (IntervalTime > delta) {
-                    av_usleep(IntervalTime-delta);
+                if(pkt->pts==AV_NOPTS_VALUE){
+                    AVRational time_base1=m_ifmt_ctx->streams[0]->time_base;
+                    //Duration between 2 frames (us)
+                    int64_t calc_duration=(double)AV_TIME_BASE/av_q2d(m_ifmt_ctx->streams[0]->r_frame_rate);
+                    //Parameters
+                    pkt->pts=(double)(frame_index*calc_duration)/(double)(av_q2d(time_base1)*AV_TIME_BASE);
+                    pkt->dts=pkt->pts;
+                    pkt->duration=(double)calc_duration/(double)(av_q2d(time_base1)*AV_TIME_BASE);
+                }
+
+                AVRational time_base = m_ifmt_ctx->streams[0]->time_base;
+                AVRational time_base_q = {1, AV_TIME_BASE};
+                int64_t pts_time = av_rescale_q(pkt->dts, time_base, time_base_q);
+                int64_t now_time = av_gettime() - m_start_time;
+                if (pts_time > now_time) {
+                    int64_t delta = pts_time - now_time;
+                    if (delta < 100000) {
+                      av_usleep(delta);
+                    }
                 }
             }
+
             m_last_frame_time = av_gettime();
+            if (pkt->stream_index == 0) frame_index++;
 
             if (m_observer) {
                 m_observer->on_read_frame(pkt);
+            }
+
+            if (m_pfnOnReadFrame) {
+                m_pfnOnReadFrame(pkt);
             }
 
             av_packet_unref(pkt);

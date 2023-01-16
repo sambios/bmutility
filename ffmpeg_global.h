@@ -7,6 +7,7 @@
 
 #ifdef __cplusplus
 extern "C" {
+#include "libavdevice/avdevice.h"
 #include "libavcodec/avcodec.h"
 #include "libavutil/avutil.h"
 #include "libavformat/avformat.h"
@@ -21,7 +22,8 @@ namespace bm {
         FfmpegGlobal() {
             av_register_all();
             avformat_network_init();
-            //av_log_set_level(AV_LOG_DEBUG);
+            avdevice_register_all();
+            av_log_set_level(AV_LOG_ERROR);
         }
 
         ~FfmpegGlobal() {

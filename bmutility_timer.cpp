@@ -2,9 +2,18 @@
 // Created by yuan on 2/26/21.
 //
 
-#include "bmutility_timer.h"
+
+#include <vector>
 #include <algorithm>
 #include <thread>
+#include <unordered_map>
+#include <mutex>
+#include <queue>
+
+#include <assert.h>
+#include <memory.h>
+
+#include "bmutility_timer.h"
 
 namespace bm {
 
@@ -21,12 +30,29 @@ namespace bm {
         return std::chrono::duration_cast<std::chrono::microseconds>(tnow.time_since_epoch()).count();
     }
 
+    uint64_t gettime_sec() {
+        auto tnow = std::chrono::steady_clock::now();
+        return std::chrono::duration_cast<std::chrono::seconds>(tnow.time_since_epoch()).count();
+    }
+
+
+
     void msleep(int msec) {
         std::this_thread::sleep_for(std::chrono::milliseconds(msec));
     }
 
     void usleep(int usec) {
         std::this_thread::sleep_for(std::chrono::microseconds(usec));
+    }
+
+    std::string timeToString(time_t sec) {
+        struct tm* tm1;
+        tm1 = std::localtime(&sec);
+        char strtmp[64];
+        sprintf(strtmp, "%d-%.2d-%.2d:%.2d:%.2d:%.2d", tm1->tm_year+1900,
+                tm1->tm_mon+1, tm1->tm_mday, tm1->tm_hour,
+                tm1->tm_min, tm1->tm_sec);
+        return strtmp;
     }
 
     struct BMTimer {
@@ -38,8 +64,16 @@ namespace bm {
     };
     using BMTimerPtr=std::shared_ptr<BMTimer>;
 
+    class BMTimerComp {
+    public:
+        bool operator()(const BMTimerPtr &a, const BMTimerPtr &b)
+        {
+            return a->timeout > b->timeout;
+        }
+    };
+
     template<typename T>
-    class MinHeap : public std::priority_queue<T, std::vector<T>> {
+    class MinHeap : public std::priority_queue<T, std::vector<T>, BMTimerComp> {
     public:
         bool remove(const T &value) {
             auto it = std::find(this->c.begin(), this->c.end(), value);
@@ -55,7 +89,7 @@ namespace bm {
 
     class BMTimerQueue: public TimerQueue {
         int generate_timer(uint32_t delay_msec, std::function<void()> func, int repeat, uint64_t *p_timer_id);
-        std::map<uint64_t, BMTimerPtr> m_mapTimers;
+        std::unordered_map<uint64_t, BMTimerPtr> m_mapTimers;
         MinHeap<BMTimerPtr> m_QTimers;
         uint64_t m_nTimerSN;
         std::mutex m_mLock;
@@ -126,6 +160,7 @@ namespace bm {
 
         virtual int run_loop() override {
             m_isRunning = true;
+            m_stopped = false;
             while (m_isRunning)
             {
                 auto timeNow = gettime_msec();
@@ -146,7 +181,7 @@ namespace bm {
                     usleep(1); //sleep 1 million second
                     continue;
                 }
-
+                m_QTimers.remove(timer);
                 m_mLock.unlock();
 
                 if (timer->lamdaCb != nullptr) {
@@ -173,7 +208,7 @@ namespace bm {
 
                 m_mLock.unlock();
             }
-            std::cout << "rtc_timer_queue(%p) exit!" << std::endl;
+            std::cout << "rtc_timer_queue exit!" << std::endl;
             m_stopped = true;
             return 1;
         }

@@ -2,9 +2,13 @@
 // Created by yuan on 2/26/21.
 //
 
-#ifndef INFERENCE_FRAMEWORK_BMUTILITY_TIMER_H
-#define INFERENCE_FRAMEWORK_BMUTILITY_TIMER_H
-#include "bmutility.h"
+#ifndef BMUTILITY_TIMER_H
+#define BMUTILITY_TIMER_H
+
+#include <iostream>
+#include <memory>
+#include <functional>
+#include <chrono>
 
 namespace bm {
 
@@ -13,6 +17,7 @@ namespace bm {
     uint64_t gettime_usec();
     void msleep(int msec);
     void usleep(int usec);
+    std::string timeToString(time_t seconds);
 
     class TimerQueue {
     public:
@@ -49,7 +54,9 @@ namespace bm {
         int threshold_{50};
     public:
         BMPerf() {}
-
+        BMPerf(const std::string &name, int threshold = 0) {
+            begin(name, threshold);
+        }
         ~BMPerf() {}
 
         void begin(const std::string &name, int threshold = 0) {
@@ -65,7 +72,7 @@ namespace bm {
             if (delta < threshold_ * 1000) {
                 //printf("%s used:%d us\n", tag_.c_str(), delta);
             } else {
-                printf("WARN:%s used:%d us > %d ms\n", tag_.c_str(), (int)delta/1000, (int)threshold_);
+                printf("WARN:%s used:%d ms > %d ms\n", tag_.c_str(), (int)delta/1000, (int)threshold_);
             }
         }
     };

@@ -1,6 +1,11 @@
+//===----------------------------------------------------------------------===//
 //
-// Created by hsyuan on 2019-02-27.
+// Copyright (C) 2022 Sophgo Technologies Inc.  All rights reserved.
 //
+// SOPHON-PIPELINE is licensed under the 2-Clause BSD License except for the
+// third-party components.
+//
+//===----------------------------------------------------------------------===//
 
 #ifndef BMUTILITY_STREAM_DECODE_H
 #define BMUTILITY_STREAM_DECODE_H
@@ -8,6 +13,19 @@
 #include "stream_demuxer.h"
 
 namespace bm {
+
+#if LIBAVCODEC_VERSION_MAJOR <= 56
+    static AVPacket *av_packet_alloc() {
+        AVPacket* pkt = new AVPacket;
+        av_init_packet(pkt);
+        return pkt;
+    }
+
+    static void av_packet_free(AVPacket** pkt){
+        av_free_packet(*pkt);
+        av_freep(pkt);
+    }
+#endif
 
     struct StreamDecoderEvents {
         virtual ~StreamDecoderEvents() {}
@@ -28,7 +46,11 @@ namespace bm {
         using OnStreamEofCallback = std::function<void()>;
         OnDecodedFrameCallback m_OnDecodedFrameFunc;
         OnDecodedSEICallback m_OnDecodedSEIFunc;
-        OnStreamEofCallback m_OnSteamEofFunc;
+
+        StreamDemuxer::OnAVFormatOpenedFunc m_pfnOnAVFormatOpened;
+        StreamDemuxer::OnAVFormatClosedFunc m_pfnOnAVFormatClosed;
+        StreamDemuxer::OnReadFrameFunc m_pfnOnReadFrame;
+        StreamDemuxer::OnReadEofFunc m_pfnOnReadEof;
 
     protected:
         std::list<AVPacket *> m_list_packets;
@@ -40,6 +62,7 @@ namespace bm {
         AVDictionary *m_opts_decoder{nullptr};
         bool m_is_waiting_iframe{true};
         int m_id{0};
+        AVRational m_timebase;
         //Functions
         int create_video_decoder(AVFormatContext *ifmt_ctx);
 
@@ -53,6 +76,7 @@ namespace bm {
 
         int get_video_stream_index(AVFormatContext *ifmt_ctx);
         bool is_key_frame(AVPacket *pkt);
+
         //
         //Overload StreamDemuxerEvents Interface.
         //
@@ -70,13 +94,36 @@ namespace bm {
 
         int set_observer(StreamDecoderEvents *observer);
 
-        void set_decoded_frame_callback(OnDecodedFrameCallback func);
-        void set_decoded_sei_info_callback(OnDecodedSEICallback func);
-        void set_stream_eof_callback(OnStreamEofCallback func);
+        void set_decoded_frame_callback(OnDecodedFrameCallback func)
+        {
+            m_OnDecodedFrameFunc = func;
+        }
+
+        void set_decoded_sei_info_callback(OnDecodedSEICallback func)
+        {
+            m_OnDecodedSEIFunc = func;
+        }
+
+        void set_avformat_opend_callback(StreamDemuxer::OnAVFormatOpenedFunc func) {
+            m_pfnOnAVFormatOpened = func;
+        }
+
+        void set_avformat_closed_callback(StreamDemuxer::OnAVFormatClosedFunc func){
+            m_pfnOnAVFormatClosed = func;
+        }
+
+        void set_read_Frame_callback(StreamDemuxer::OnReadFrameFunc func){
+            m_pfnOnReadFrame = func;
+        }
+
+        void set_read_eof_callback(StreamDemuxer::OnReadEofFunc func){
+            m_pfnOnReadEof = func;
+        }
 
         int open_stream(std::string url, bool repeat = true, AVDictionary *opts=nullptr);
 
         int close_stream(bool is_waiting = true);
+        AVCodecID get_video_codec_id();
 
         //External utilities
         static AVPacket* ffmpeg_packet_alloc();
