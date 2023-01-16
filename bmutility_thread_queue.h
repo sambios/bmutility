@@ -7,8 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SOPHON_PIPELINE_THREAD_QUEUE_H
-#define SOPHON_PIPELINE_THREAD_QUEUE_H
+#ifndef BMUTTILTY_THREAD_QUEUE_H
+#define BMUTTILTY_THREAD_QUEUE_H
 
 #include <iostream>
 #include <string>

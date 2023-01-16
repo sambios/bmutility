@@ -147,10 +147,10 @@ namespace bm {
             }
         }
 
-        //int set_device_mem(bm_device_mem_t *mem) {
-        //    this->m_tensor->device_mem = *mem;
-        //    return 0;
-        //}
+        int set_device_mem(bm_device_mem_t *mem) {
+            this->m_tensor->device_mem = *mem;
+            return 0;
+        }
 
         const bm_device_mem_t get_device_mem() {
             return this->m_tensor->device_mem;
