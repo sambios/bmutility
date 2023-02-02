@@ -531,9 +531,12 @@ namespace bm {
         static std::shared_ptr<BMNNHandle> create(int dev_id) {
             return std::make_shared<BMNNHandle>(dev_id);
         }
-        BMNNHandle(int dev_id = 0) : m_dev_id(dev_id) {
+        BMNNHandle(int dev_id = 0) : m_handle(nullptr), m_dev_id(dev_id){
             int ret = bm_dev_request(&m_handle, dev_id);
-            assert(BM_SUCCESS == ret);
+            if (BM_SUCCESS != ret){
+                printf("bm_dev_request err=%d\n", ret);
+                return;
+            }
         }
 
         ~BMNNHandle() {
@@ -553,7 +556,7 @@ namespace bm {
 
     class BMNNContext : public NoCopyable {
         BMNNHandlePtr m_handlePtr;
-        void *m_bmrt;
+        void *m_bmrt = nullptr;
         std::vector<std::string> m_network_names;
 
     public:

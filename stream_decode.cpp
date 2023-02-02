@@ -316,7 +316,7 @@ namespace bm {
         auto codec_id = ifmt_ctx->streams[video_index]->codec->codec_id;
 #endif
 
-        AVCodec *pCodec = avcodec_find_decoder(codec_id);
+        const AVCodec *pCodec = avcodec_find_decoder(codec_id);
         if (NULL == pCodec) {
             printf("can't find code_id %d\n", codec_id);
             return -1;
@@ -393,7 +393,7 @@ namespace bm {
 
     AVCodecContext* StreamDecoder::ffmpeg_create_decoder(enum AVCodecID codec_id, AVDictionary **opts)
     {
-        AVCodec *pCodec = avcodec_find_decoder(codec_id);
+        const AVCodec *pCodec = avcodec_find_decoder(codec_id);
         if (NULL == pCodec) {
             printf("can't find code_id %d\n", codec_id);
             return nullptr;

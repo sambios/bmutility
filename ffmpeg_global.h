@@ -3,7 +3,7 @@
 //
 
 #ifndef BM_UTILITY_FFMPEG_GLOBAL_H
-#define BM_UTILTIY_FFMPEG_GLOBAL_H
+#define BM_UTILITY_FFMPEG_GLOBAL_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,7 +20,9 @@ namespace bm {
     class FfmpegGlobal {
     public:
         FfmpegGlobal() {
+#if LIBAVCODEC_VERSION_MAJOR <= 56
             av_register_all();
+#endif
             avformat_network_init();
             avdevice_register_all();
             av_log_set_level(AV_LOG_ERROR);
