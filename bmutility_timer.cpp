@@ -109,7 +109,7 @@ namespace bm {
             std::cout << "BMTimerQueue dtor" << std::endl;
         }
 
-        virtual int create_timer(uint32_t delay_msec, std::function<void()> func, int repeat, uint64_t *p_timer_id) override
+        virtual int create_timer(uint32_t delay_msec, uint32_t skew, std::function<void()> func, int repeat, uint64_t *p_timer_id) override
         {
             RTC_RETURN_EXP_IF_FAIL(func != nullptr , return -1);
             BMTimerPtr timer = std::make_shared<BMTimer>();
@@ -119,7 +119,7 @@ namespace bm {
             }
 
             timer->lamdaCb = func;
-            timer->timeout = gettime_msec() + delay_msec;
+            timer->timeout = gettime_msec() + skew;
             timer->delay_msec = delay_msec;
             timer->start_id = m_nTimerSN ++;
             timer->repeat = repeat;

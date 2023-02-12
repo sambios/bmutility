@@ -26,7 +26,7 @@ namespace bm {
             std::cout << "TimerQueue dtor" << std::endl;
         };
 
-        virtual int create_timer(uint32_t delay_msec, std::function<void()> func, int repeat, uint64_t *p_timer_id) = 0;
+        virtual int create_timer(uint32_t delay_msec, uint32_t skew, std::function<void()> func, int repeat, uint64_t *p_timer_id) = 0;
         virtual int delete_timer(uint64_t timer_id) = 0;
         virtual size_t count() = 0;
         virtual int run_loop() = 0;
